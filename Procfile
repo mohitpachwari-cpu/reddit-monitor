@@ -1,1 +1,1 @@
-worker: python reddit_monitor.py
+worker: python3 reddit_monitor.py
