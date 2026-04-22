@@ -1,6 +1,7 @@
 import requests
 import time
 import logging
+import xml.etree.ElementTree as ET
 from urllib.parse import quote
 from datetime import datetime
 
@@ -12,7 +13,7 @@ SUBREDDIT_NAME = "IndiaDealsExchange"
 
 # Keywords to monitor (case-insensitive, add more anytime)
 KEYWORDS = [
-    "trades",
+    "BUY",
     # "SELL",
     # "DEAL",
     # "DISCOUNT",
@@ -44,18 +45,58 @@ log = logging.getLogger(__name__)
 # ─────────────────────────────────────────────
 
 HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Accept": "application/rss+xml, application/xml, text/xml, */*",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Accept-Encoding": "gzip, deflate, br",
+    "Cache-Control": "no-cache",
 }
 
+RSS_NS = "{http://www.w3.org/2005/Atom}"
+
 def fetch_new_posts(limit=25):
-    url = f"https://www.reddit.com/r/{SUBREDDIT_NAME}/new.json?limit={limit}"
+    """Fetch posts via RSS feed — more reliable from cloud servers than JSON API."""
+    url = f"https://www.reddit.com/r/{SUBREDDIT_NAME}/new/.rss?limit={limit}"
     try:
         response = requests.get(url, headers=HEADERS, timeout=15)
         if response.status_code == 200:
-            data = response.json()
-            return data["data"]["children"]
+            root = ET.fromstring(response.content)
+            posts = []
+            for entry in root.findall(f"{RSS_NS}entry"):
+                post = {
+                    "id":               (entry.findtext(f"{RSS_NS}id") or "").split("_")[-1],
+                    "title":            entry.findtext(f"{RSS_NS}title") or "",
+                    "selftext":         entry.findtext(f"{RSS_NS}content") or "",
+                    "permalink":        "",
+                    "author":           "",
+                    "link_flair_text":  "",
+                    "author_flair_text":"",
+                    "created_utc":      0,
+                }
+                # Extract link
+                link = entry.find(f"{RSS_NS}link")
+                if link is not None:
+                    post["permalink"] = link.get("href", "")
+
+                # Extract author
+                author = entry.find(f"{RSS_NS}author")
+                if author is not None:
+                    post["author"] = (author.findtext(f"{RSS_NS}name") or "").replace("/u/", "")
+
+                # Extract timestamp
+                updated = entry.findtext(f"{RSS_NS}updated") or ""
+                if updated:
+                    try:
+                        dt = datetime.strptime(updated, "%Y-%m-%dT%H:%M:%S+00:00")
+                        post["created_utc"] = dt.timestamp()
+                    except:
+                        pass
+
+                posts.append({"data": post})
+            return posts
+
         elif response.status_code == 429:
-            log.warning("⚠️ Rate limited by Reddit. Waiting 90 seconds...")
+            log.warning("⚠️ Rate limited. Waiting 90 seconds...")
             time.sleep(90)
             return []
         else:
@@ -89,14 +130,13 @@ def contains_keyword(post_data):
 # ─────────────────────────────────────────────
 
 def send_whatsapp(message: str):
-    try:
-        url = (
+    tryurl = (
     f"https://api.textmebot.com/send.php"
     f"?recipient={WHATSAPP_CONFIG['phone']}"
     f"&apikey={WHATSAPP_CONFIG['api_key']}"
     f"&text={quote(message)}"
 )
-        response = requests.get(url, timeout=10)
+    response = requests.get(url, timeout=10)
         if response.status_code == 200:
             log.info("✅ WhatsApp alert sent!")
         else:
@@ -112,7 +152,8 @@ def build_message(post_data, matched_keyword):
     flair   = post_data.get("link_flair_text") or "None"
     author  = post_data.get("author", "[deleted]")
     title   = post_data.get("title", "No title")
-    link    = "https://reddit.com" + post_data.get("permalink", "")
+    permalink = post_data.get("permalink", "")
+    link    = permalink if permalink.startswith("http") else "https://reddit.com" + permalink
     ts      = datetime.utcfromtimestamp(post_data.get("created_utc", 0)).strftime("%d %b %Y, %H:%M UTC")
 
     return (
