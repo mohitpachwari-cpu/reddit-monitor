@@ -13,7 +13,11 @@ import random
 SUBREDDIT_NAME = "IndiaDealsExchange"
 
 KEYWORDS = [
-    "BUY",
+    "AI Coupon",
+    "Air India",
+    "Ai Points",
+    "Maharaja",
+    "Blinkit",
     # "SELL",
     # "DEAL",
     # "DISCOUNT",
