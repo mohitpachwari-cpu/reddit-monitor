@@ -18,7 +18,7 @@ KEYWORDS = [
     "Ai Points",
     "Maharaja",
     "Blinkit",
-     "BUY",
+     "Trade",
     # "DEAL",
     # "DISCOUNT",
 ]
