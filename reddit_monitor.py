@@ -23,7 +23,7 @@ WHATSAPP_CONFIG = {
     "api_key": "Ys7qCVcJhKFA",       # From TextMeBot/CallMeBot
 }
 
-POLL_INTERVAL = 60  # seconds between checks
+POLL_INTERVAL = 120  # seconds between checks
 
 # ─────────────────────────────────────────────
 #  LOGGING SETUP
