@@ -4,9 +4,10 @@ import logging
 import xml.etree.ElementTree as ET
 from urllib.parse import quote
 from datetime import datetime
+import random
 
 # ─────────────────────────────────────────────
-#  CONFIGURATION — Edit these before running
+#  CONFIGURATION
 # ─────────────────────────────────────────────
 
 SUBREDDIT_NAME = "IndiaDealsExchange"
@@ -19,46 +20,59 @@ KEYWORDS = [
 ]
 
 WHATSAPP_CONFIG = {
-    "phone":   "917017007171",       # Your number with country code, no +
-    "api_key": "Ys7qCVcJhKFA",       # From TextMeBot/CallMeBot
+    "phone":   "919758800885",
+    "api_key": "Ys7qCVcJhKFA",
 }
 
-POLL_INTERVAL = 120  # seconds between checks
+POLL_INTERVAL = 120  # seconds between checks (2 min = less likely to get blocked)
 
 # ─────────────────────────────────────────────
-#  LOGGING SETUP
+#  LOGGING
 # ─────────────────────────────────────────────
 
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
-    handlers=[
-        logging.StreamHandler()
-    ]
+    handlers=[logging.StreamHandler()]
 )
 log = logging.getLogger(__name__)
 
 # ─────────────────────────────────────────────
-#  HEADERS
+#  ROTATING USER AGENTS (looks more human)
 # ─────────────────────────────────────────────
 
-HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-    "Accept": "application/rss+xml, application/xml, text/xml, */*",
-    "Accept-Language": "en-US,en;q=0.9",
-}
+USER_AGENTS = [
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/118.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 13_1) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.1 Safari/605.1.15",
+]
 
 RSS_NS = "{http://www.w3.org/2005/Atom}"
 
+consecutive_403s = 0
+
 # ─────────────────────────────────────────────
-#  FETCH POSTS VIA RSS
+#  FETCH POSTS
 # ─────────────────────────────────────────────
 
 def fetch_new_posts():
+    global consecutive_403s
+
+    headers = {
+        "User-Agent": random.choice(USER_AGENTS),
+        "Accept": "application/rss+xml, application/xml, text/xml, */*",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Cache-Control": "no-cache",
+    }
+
     url = f"https://www.reddit.com/r/{SUBREDDIT_NAME}/new/.rss?limit=25"
+
     try:
-        response = requests.get(url, headers=HEADERS, timeout=15)
+        response = requests.get(url, headers=headers, timeout=15)
+
         if response.status_code == 200:
+            consecutive_403s = 0  # reset on success
             root = ET.fromstring(response.content)
             posts = []
             for entry in root.findall(f"{RSS_NS}entry"):
@@ -90,15 +104,25 @@ def fetch_new_posts():
                     "created_utc": created_utc,
                 })
             return posts
+
+        elif response.status_code == 403:
+            consecutive_403s += 1
+            wait = min(300, 60 * consecutive_403s)  # wait longer each time, max 5 min
+            log.warning(f"403 blocked (#{consecutive_403s}). Waiting {wait}s before retry...")
+            time.sleep(wait)
+            return []
+
         elif response.status_code == 429:
-            log.warning("Rate limited. Waiting 90 seconds...")
-            time.sleep(90)
+            log.warning("Rate limited. Waiting 3 minutes...")
+            time.sleep(180)
             return []
+
         else:
-            log.warning(f"Reddit returned status {response.status_code}")
+            log.warning(f"Reddit returned status {response.status_code}. Retrying next cycle.")
             return []
+
     except Exception as e:
-        log.error(f"Failed to fetch posts: {e}")
+        log.error(f"Fetch error: {e}. Retrying next cycle.")
         return []
 
 # ─────────────────────────────────────────────
@@ -119,10 +143,10 @@ def contains_keyword(post):
 def send_whatsapp(message):
     try:
         url = (
-            "https://api.textmebot.com/send.php"
-            f"?recipient={WHATSAPP_CONFIG['phone']}"
-            f"&apikey={WHATSAPP_CONFIG['api_key']}"
-            f"&text={quote(message)}"
+            f"https://api.textmebot.com/send.php"
+    f"?recipient={WHATSAPP_CONFIG['phone']}"
+    f"&apikey={WHATSAPP_CONFIG['api_key']}"
+    f"&text={quote(message)}"
         )
         response = requests.get(url, timeout=10)
         if response.status_code == 200:
@@ -161,29 +185,37 @@ def main():
     first_run = True
 
     while True:
-        posts = fetch_new_posts()
-        for post in posts:
-            post_id = post["id"]
-            if post_id in seen_ids:
-                continue
-            seen_ids.add(post_id)
-            if first_run:
-                continue
-            matched = contains_keyword(post)
-            if matched:
-                log.info(f"Keyword '{matched}' found: {post['title'][:60]}")
-                message = build_message(post, matched)
-                send_whatsapp(message)
-                time.sleep(2)
+        try:
+            posts = fetch_new_posts()
 
-        if first_run:
-            log.info(f"Indexed {len(seen_ids)} existing posts. Now watching for new ones...")
-            first_run = False
+            for post in posts:
+                post_id = post["id"]
+                if post_id in seen_ids:
+                    continue
+                seen_ids.add(post_id)
+                if first_run:
+                    continue
+                matched = contains_keyword(post)
+                if matched:
+                    log.info(f"Keyword '{matched}' found: {post['title'][:60]}")
+                    message = build_message(post, matched)
+                    send_whatsapp(message)
+                    time.sleep(2)
 
-        if len(seen_ids) > 5000:
-            seen_ids = set(list(seen_ids)[-2000:])
+            if first_run and posts:
+                log.info(f"Indexed {len(seen_ids)} existing posts. Now watching for new ones...")
+                first_run = False
 
-        time.sleep(POLL_INTERVAL)
+            if len(seen_ids) > 5000:
+                seen_ids = set(list(seen_ids)[-2000:])
+
+            # Add small random jitter to polling (looks more human)
+            jitter = random.randint(0, 30)
+            time.sleep(POLL_INTERVAL + jitter)
+
+        except Exception as e:
+            log.error(f"Unexpected error: {e}. Continuing in 60s...")
+            time.sleep(60)
 
 
 if __name__ == "__main__":
