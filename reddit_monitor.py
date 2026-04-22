@@ -19,7 +19,7 @@ KEYWORDS = [
 ]
 
 WHATSAPP_CONFIG = {
-    "phone":   "919758800885",       # Your number with country code, no +
+    "phone":   "917017007171",       # Your number with country code, no +
     "api_key": "Ys7qCVcJhKFA",       # From TextMeBot/CallMeBot
 }
 
