@@ -3,7 +3,6 @@ import requests
 import time
 import logging
 import xml.etree.ElementTree as ET
-from urllib.parse import quote
 from datetime import datetime
 import random
 
@@ -11,8 +10,14 @@ import random
 #  CONFIGURATION
 # ─────────────────────────────────────────────
 
-SUBREDDIT_NAME = "IndiaDealsExchange"
+# Add as many subreddits as you want
+SUBREDDITS = [
+    "IndiaDealsExchange",
+    # "IndianGaming",
+    # "india",
+]
 
+# Keywords to monitor (case-insensitive)
 KEYWORDS = [
     "AI Coupon",
     "Air India",
@@ -24,12 +29,12 @@ KEYWORDS = [
     # "DISCOUNT",
 ]
 
-WHATSAPP_CONFIG = {
-    "phone":   "919758800885",
-    "api_key": "Ys7qCVcJhKFA",
+TELEGRAM_CONFIG = {
+    "bot_token": "8648065223:AAEVkKKymQcQiESnG-dwqf82_IimhYohCDY",   # From @BotFather
+    "chat_id":   "6023389108",            # Your Chat ID
 }
 
-POLL_INTERVAL = 120  # seconds between checks (2 min = less likely to get blocked)
+POLL_INTERVAL = 120  # seconds between each subreddit check
 
 # ─────────────────────────────────────────────
 #  LOGGING
@@ -43,7 +48,7 @@ logging.basicConfig(
 log = logging.getLogger(__name__)
 
 # ─────────────────────────────────────────────
-#  ROTATING USER AGENTS (looks more human)
+#  ROTATING USER AGENTS
 # ─────────────────────────────────────────────
 
 USER_AGENTS = [
@@ -54,14 +59,13 @@ USER_AGENTS = [
 ]
 
 RSS_NS = "{http://www.w3.org/2005/Atom}"
-
 consecutive_403s = 0
 
 # ─────────────────────────────────────────────
-#  FETCH POSTS
+#  FETCH POSTS FROM ONE SUBREDDIT
 # ─────────────────────────────────────────────
 
-def fetch_new_posts():
+def fetch_posts_from(subreddit):
     global consecutive_403s
 
     headers = {
@@ -71,13 +75,13 @@ def fetch_new_posts():
         "Cache-Control": "no-cache",
     }
 
-    url = f"https://www.reddit.com/r/{SUBREDDIT_NAME}/new/.rss?limit=25"
+    url = f"https://www.reddit.com/r/{subreddit}/new/.rss?limit=25"
 
     try:
         response = requests.get(url, headers=headers, timeout=15)
 
         if response.status_code == 200:
-            consecutive_403s = 0  # reset on success
+            consecutive_403s = 0
             root = ET.fromstring(response.content)
             posts = []
             for entry in root.findall(f"{RSS_NS}entry"):
@@ -101,33 +105,34 @@ def fetch_new_posts():
                     except Exception:
                         pass
                 posts.append({
-                    "id": post_id,
+                    "id": f"{subreddit}_{post_id}",  # prefix with subreddit to avoid ID collisions
                     "title": title,
                     "selftext": content,
                     "permalink": permalink,
                     "author": author,
                     "created_utc": created_utc,
+                    "subreddit": subreddit,
                 })
             return posts
 
         elif response.status_code == 403:
             consecutive_403s += 1
-            wait = min(300, 60 * consecutive_403s)  # wait longer each time, max 5 min
-            log.warning(f"403 blocked (#{consecutive_403s}). Waiting {wait}s before retry...")
+            wait = min(300, 60 * consecutive_403s)
+            log.warning(f"r/{subreddit} — 403 blocked (#{consecutive_403s}). Waiting {wait}s...")
             time.sleep(wait)
             return []
 
         elif response.status_code == 429:
-            log.warning("Rate limited. Waiting 3 minutes...")
+            log.warning(f"r/{subreddit} — Rate limited. Waiting 3 minutes...")
             time.sleep(180)
             return []
 
         else:
-            log.warning(f"Reddit returned status {response.status_code}. Retrying next cycle.")
+            log.warning(f"r/{subreddit} — Reddit returned status {response.status_code}")
             return []
 
     except Exception as e:
-        log.error(f"Fetch error: {e}. Retrying next cycle.")
+        log.error(f"r/{subreddit} — Fetch error: {e}")
         return []
 
 # ─────────────────────────────────────────────
@@ -137,31 +142,28 @@ def fetch_new_posts():
 def contains_keyword(post):
     combined = (post["title"] + " " + post["selftext"]).upper()
     for keyword in KEYWORDS:
-        # Use word boundaries to match whole words only
-        if re.search(r'\b' + re.escape(keyword.upper()) + r'\b', combined):
+        if keyword.upper() in combined:
             return keyword
     return None
-
 
 # ─────────────────────────────────────────────
 #  WHATSAPP SENDER
 # ─────────────────────────────────────────────
 
-def send_whatsapp(message):
+def send_telegram(message):
     try:
-        url = (
-            f"https://api.textmebot.com/send.php"
-    f"?recipient={WHATSAPP_CONFIG['phone']}"
-    f"&apikey={WHATSAPP_CONFIG['api_key']}"
-    f"&text={quote(message)}"
-        )
-        response = requests.get(url, timeout=10)
+        url = f"https://api.telegram.org/bot{TELEGRAM_CONFIG['bot_token']}/sendMessage"
+        payload = {
+            "chat_id": TELEGRAM_CONFIG["chat_id"],
+            "text": message,
+        }
+        response = requests.post(url, json=payload, timeout=10)
         if response.status_code == 200:
-            log.info("WhatsApp alert sent!")
+            log.info("Telegram alert sent!")
         else:
-            log.warning(f"WhatsApp API status: {response.status_code}")
+            log.warning(f"Telegram API status: {response.status_code} — {response.text}")
     except Exception as e:
-        log.error(f"WhatsApp send failed: {e}")
+        log.error(f"Telegram send failed: {e}")
 
 # ─────────────────────────────────────────────
 #  MESSAGE BUILDER
@@ -171,6 +173,7 @@ def build_message(post, matched_keyword):
     ts = datetime.utcfromtimestamp(post["created_utc"]).strftime("%d %b %Y, %H:%M UTC") if post["created_utc"] else "Unknown"
     return (
         f"Keyword Alert: {matched_keyword}\n"
+        f"Subreddit: r/{post['subreddit']}\n"
         f"------------------\n"
         f"Title: {post['title']}\n"
         f"Author: u/{post['author']}\n"
@@ -184,39 +187,42 @@ def build_message(post, matched_keyword):
 # ─────────────────────────────────────────────
 
 def main():
-    log.info(f"Monitoring r/{SUBREDDIT_NAME}")
+    log.info(f"Monitoring {len(SUBREDDITS)} subreddit(s): {', '.join(['r/'+s for s in SUBREDDITS])}")
     log.info(f"Keywords: {', '.join(KEYWORDS)}")
-    log.info(f"Polling every {POLL_INTERVAL} seconds")
+    log.info(f"Polling every {POLL_INTERVAL} seconds per subreddit")
 
     seen_ids = set()
     first_run = True
 
     while True:
         try:
-            posts = fetch_new_posts()
+            for subreddit in SUBREDDITS:
+                posts = fetch_posts_from(subreddit)
 
-            for post in posts:
-                post_id = post["id"]
-                if post_id in seen_ids:
-                    continue
-                seen_ids.add(post_id)
-                if first_run:
-                    continue
-                matched = contains_keyword(post)
-                if matched:
-                    log.info(f"Keyword '{matched}' found: {post['title'][:60]}")
-                    message = build_message(post, matched)
-                    send_whatsapp(message)
-                    time.sleep(2)
+                for post in posts:
+                    post_id = post["id"]
+                    if post_id in seen_ids:
+                        continue
+                    seen_ids.add(post_id)
+                    if first_run:
+                        continue
+                    matched = contains_keyword(post)
+                    if matched:
+                        log.info(f"'{matched}' found in r/{subreddit}: {post['title'][:60]}")
+                        message = build_message(post, matched)
+                        send_telegram(message)
+                        time.sleep(2)
 
-            if first_run and posts:
-                log.info(f"Indexed {len(seen_ids)} existing posts. Now watching for new ones...")
+                # Small delay between subreddit fetches
+                time.sleep(random.randint(5, 15))
+
+            if first_run:
+                log.info(f"Indexed {len(seen_ids)} existing posts across all subreddits. Now watching...")
                 first_run = False
 
             if len(seen_ids) > 5000:
                 seen_ids = set(list(seen_ids)[-2000:])
 
-            # Add small random jitter to polling (looks more human)
             jitter = random.randint(0, 30)
             time.sleep(POLL_INTERVAL + jitter)
 
