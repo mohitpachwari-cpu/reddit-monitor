@@ -25,7 +25,7 @@ KEYWORDS = [
     "Maharaja",
     "Blinkit",
     "Taj"
-    # "DEAL",
+    "Buy",
     # "DISCOUNT",
 ]
 
