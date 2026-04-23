@@ -1,3 +1,4 @@
+import re
 import requests
 import time
 import logging
@@ -136,7 +137,8 @@ def fetch_new_posts():
 def contains_keyword(post):
     combined = (post["title"] + " " + post["selftext"]).upper()
     for keyword in KEYWORDS:
-        if (f" {keyword.upper()} " in f" {combined} ")
+        # Use word boundaries to match whole words only
+        if re.search(r'\b' + re.escape(keyword.upper()) + r'\b', combined):
             return keyword
     return None
 
