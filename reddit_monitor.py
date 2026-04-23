@@ -136,7 +136,8 @@ def fetch_new_posts():
 def contains_keyword(post):
     combined = (post["title"] + " " + post["selftext"]).upper()
     for keyword in KEYWORDS:
-        if keyword.upper() in combined:
+        # Match whole words only, not substrings
+        if f" {keyword.upper()} " in f" {combined} ":
             return keyword
     return None
 
