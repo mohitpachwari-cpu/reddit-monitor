@@ -10,24 +10,38 @@ import random
 #  CONFIGURATION
 # ─────────────────────────────────────────────
 
-# Add as many subreddits as you want
-SUBREDDITS = [
-    "IndiaDealsExchange",
-    "amexindia",
-    # "india",
-]
+# Each subreddit has its own keyword list
+# Add/remove subreddits and keywords freely
+SUBREDDIT_KEYWORDS = {
+    "IndiaDealsExchange": [
+        "AI Coupon",
+        "Air India",
+        "AI Points",
+        "Maharaja",
+        "Blinkit",
+        "Taj",
+        "Yatra",
+    ],
+    "amexindia": [
+        "AI Coupon",
+        "Air India",
+        "AI Points",
+        "Maharaja",
+        "Blinkit",
+        "Taj",
+        "Yatra",
+    ],
+    "airindia": [
+        "points",
+        "miles",
+        "reward",
+        "redeem",
+        "flying returns",
+    ],
+}
 
-# Keywords to monitor (case-insensitive)
-KEYWORDS = [
-    "AI Coupon",
-    "Air India",
-    "Ai Points",
-    "Maharaja",
-    "Blinkit",
-    "Taj",
-    "Yatra",
-    # "DISCOUNT",
-]
+# Derived — do not edit
+SUBREDDITS = list(SUBREDDIT_KEYWORDS.keys())
 
 TELEGRAM_CONFIG = {
     "bot_token": "8648065223:AAEVkKKymQcQiESnG-dwqf82_IimhYohCDY",   # From @BotFather
@@ -140,8 +154,9 @@ def fetch_posts_from(subreddit):
 # ─────────────────────────────────────────────
 
 def contains_keyword(post):
+    keywords = SUBREDDIT_KEYWORDS.get(post["subreddit"], [])
     combined = (post["title"] + " " + post["selftext"]).upper()
-    for keyword in KEYWORDS:
+    for keyword in keywords:
         if keyword.upper() in combined:
             return keyword
     return None
@@ -187,8 +202,9 @@ def build_message(post, matched_keyword):
 # ─────────────────────────────────────────────
 
 def main():
-    log.info(f"Monitoring {len(SUBREDDITS)} subreddit(s): {', '.join(['r/'+s for s in SUBREDDITS])}")
-    log.info(f"Keywords: {', '.join(KEYWORDS)}")
+    log.info(f"Monitoring {len(SUBREDDITS)} subreddit(s):")
+    for sub, kws in SUBREDDIT_KEYWORDS.items():
+        log.info(f"  r/{sub} → {', '.join(kws)}")
     log.info(f"Polling every {POLL_INTERVAL} seconds per subreddit")
 
     seen_ids = set()
