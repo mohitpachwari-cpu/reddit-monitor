@@ -13,7 +13,7 @@ import random
 # Add as many subreddits as you want
 SUBREDDITS = [
     "IndiaDealsExchange",
-    # "IndianGaming",
+    "amexindia",
     # "india",
 ]
 
