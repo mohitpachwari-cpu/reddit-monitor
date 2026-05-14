@@ -20,6 +20,7 @@ SUBREDDIT_KEYWORDS = {
         "Maharaja",
         "Blinkit",
         "Taj",
+        "Easemytrip",
         "Yatra",
     ],
     "amexindia": [
