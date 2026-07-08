@@ -15,13 +15,17 @@ import random
 SUBREDDIT_KEYWORDS = {
     "IndiaDealsExchange": [
         "AI Coupon",
+        "PE",
+        "Economy",
         "Air India",
         "AI Points",
         "Maharaja",
         "Blinkit",
         "buy",
         "Taj",
-        "UPI",
+        "Marriot",
+        "Supercoin",
+        "Flight",
         "Easemytrip",
         "Yatra",
     ],
@@ -32,6 +36,7 @@ SUBREDDIT_KEYWORDS = {
         "Maharaja",
         "Blinkit",
         "Taj",
+        "points",
         "Yatra",
     ],
     "airindia": [
