@@ -21,6 +21,7 @@ SUBREDDIT_KEYWORDS = {
         "Blinkit",
         "buy",
         "Taj",
+        "UPI",
         "Easemytrip",
         "Yatra",
     ],
