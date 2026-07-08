@@ -19,7 +19,7 @@ SUBREDDIT_KEYWORDS = {
         "AI Points",
         "Maharaja",
         "Blinkit",
-        "buy',
+        "buy",
         "Taj",
         "Easemytrip",
         "Yatra",
