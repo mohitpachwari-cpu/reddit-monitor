@@ -15,7 +15,6 @@ import random
 SUBREDDIT_KEYWORDS = {
     "IndiaDealsExchange": [
         "AI Coupon",
-        "PE",
         "Economy",
         "Air India",
         "AI Points",
