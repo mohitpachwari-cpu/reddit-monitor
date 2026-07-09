@@ -19,7 +19,6 @@ SUBREDDIT_KEYWORDS = {
         "Air India",
         "AI Points",
         "Maharaja",
-        "Blinkit",
         "Taj",
         "Marriot",
         "Supercoin",
