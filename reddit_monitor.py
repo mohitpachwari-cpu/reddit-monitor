@@ -1,17 +1,17 @@
-import re
+import os
 import requests
 import time
 import logging
 import xml.etree.ElementTree as ET
-from datetime import datetime
+from datetime import datetime, timezone
 import random
 
 # ─────────────────────────────────────────────
 #  CONFIGURATION
 # ─────────────────────────────────────────────
 
-# Each subreddit has its own keyword list
-# Add/remove subreddits and keywords freely
+# Each subreddit has its own keyword list.
+# Add/remove subreddits and keywords freely.
 SUBREDDIT_KEYWORDS = {
     "IndiaDealsExchange": [
         "AI Coupon",
@@ -35,14 +35,14 @@ SUBREDDIT_KEYWORDS = {
         "Taj",
         "points",
         "Yatra",
-     ],
+    ],
     "CreditCardsIndia": [
         "AI Coupon",
         "Air India",
         "Infinia",
-        "Points"
-        "MR points"
-        "AI Points",
+        "Points",       # <-- these three were missing commas in the
+        "MR points",    #     original, so Python glued them into one
+        "AI Points",    #     keyword that never matched. Fixed.
         "Maharaja",
         "Blinkit",
         "Taj",
@@ -61,12 +61,18 @@ SUBREDDIT_KEYWORDS = {
 # Derived — do not edit
 SUBREDDITS = list(SUBREDDIT_KEYWORDS.keys())
 
+# Secrets come from environment variables (set these in Railway → Variables).
+# Nothing sensitive lives in this file anymore.
 TELEGRAM_CONFIG = {
-    "bot_token": "8648065223:AAEVkKKymQcQiESnG-dwqf82_IimhYohCDY",   # From @BotFather
-    "chat_id":   "6023389108",            # Your Chat ID
+    "bot_token": os.environ.get("TELEGRAM_BOT_TOKEN", ""),
+    "chat_id":   os.environ.get("TELEGRAM_CHAT_ID", ""),
 }
 
-POLL_INTERVAL = 120  # seconds between each subreddit check
+# Reddit throttles unauthenticated RSS to roughly 1 request/minute per IP.
+# We fetch one subreddit at a time and wait at least this long between fetches
+# so every request is the first in a fresh window (no more random 429s).
+MIN_GAP_BETWEEN_FETCHES = (65, 80)   # seconds, randomized
+PAUSE_BETWEEN_SWEEPS    = (10, 30)   # small breather after each full sweep
 
 # ─────────────────────────────────────────────
 #  LOGGING
@@ -133,11 +139,11 @@ def fetch_posts_from(subreddit):
                 if updated:
                     try:
                         dt = datetime.strptime(updated, "%Y-%m-%dT%H:%M:%S+00:00")
-                        created_utc = dt.timestamp()
+                        created_utc = dt.replace(tzinfo=timezone.utc).timestamp()
                     except Exception:
                         pass
                 posts.append({
-                    "id": f"{subreddit}_{post_id}",  # prefix with subreddit to avoid ID collisions
+                    "id": f"{subreddit}_{post_id}",  # prefix avoids ID collisions across subs
                     "title": title,
                     "selftext": content,
                     "permalink": permalink,
@@ -155,8 +161,20 @@ def fetch_posts_from(subreddit):
             return []
 
         elif response.status_code == 429:
-            log.warning(f"r/{subreddit} — Rate limited. Waiting 3 minutes...")
-            time.sleep(180)
+            # Reddit tells us exactly how long to wait — honor the headers
+            # instead of guessing. Prefer Retry-After, fall back to the
+            # rate-limit reset header, then a sane default.
+            retry_after = response.headers.get("Retry-After")
+            reset = response.headers.get("x-ratelimit-reset")
+            if retry_after and retry_after.replace(".", "", 1).isdigit():
+                wait = int(float(retry_after)) + 2
+            elif reset and reset.replace(".", "", 1).isdigit():
+                wait = int(float(reset)) + 2
+            else:
+                wait = 60
+            wait = min(wait, 300)
+            log.warning(f"r/{subreddit} — rate limited. Waiting {wait}s...")
+            time.sleep(wait)
             return []
 
         else:
@@ -180,7 +198,7 @@ def contains_keyword(post):
     return None
 
 # ─────────────────────────────────────────────
-#  WHATSAPP SENDER
+#  TELEGRAM SENDER
 # ─────────────────────────────────────────────
 
 def send_telegram(message):
@@ -203,7 +221,10 @@ def send_telegram(message):
 # ─────────────────────────────────────────────
 
 def build_message(post, matched_keyword):
-    ts = datetime.utcfromtimestamp(post["created_utc"]).strftime("%d %b %Y, %H:%M UTC") if post["created_utc"] else "Unknown"
+    if post["created_utc"]:
+        ts = datetime.fromtimestamp(post["created_utc"], tz=timezone.utc).strftime("%d %b %Y, %H:%M UTC")
+    else:
+        ts = "Unknown"
     return (
         f"Keyword Alert: {matched_keyword}\n"
         f"Subreddit: r/{post['subreddit']}\n"
@@ -220,12 +241,17 @@ def build_message(post, matched_keyword):
 # ─────────────────────────────────────────────
 
 def main():
+    if not TELEGRAM_CONFIG["bot_token"] or not TELEGRAM_CONFIG["chat_id"]:
+        log.error("Missing TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID environment variable. Exiting.")
+        return
+
     log.info(f"Monitoring {len(SUBREDDITS)} subreddit(s):")
     for sub, kws in SUBREDDIT_KEYWORDS.items():
         log.info(f"  r/{sub} → {', '.join(kws)}")
-    log.info(f"Polling every {POLL_INTERVAL} seconds per subreddit")
+    log.info(f"Waiting {MIN_GAP_BETWEEN_FETCHES[0]}-{MIN_GAP_BETWEEN_FETCHES[1]}s between each subreddit fetch")
 
     seen_ids = set()
+    seen_order = []   # tracks insertion order so trimming keeps the NEWEST ids
     first_run = True
 
     while True:
@@ -238,6 +264,7 @@ def main():
                     if post_id in seen_ids:
                         continue
                     seen_ids.add(post_id)
+                    seen_order.append(post_id)
                     if first_run:
                         continue
                     matched = contains_keyword(post)
@@ -247,18 +274,21 @@ def main():
                         send_telegram(message)
                         time.sleep(2)
 
-                # Small delay between subreddit fetches
-                time.sleep(random.randint(5, 15))
+                # Respect Reddit's ~1 request/minute limit: wait before the
+                # next subreddit so every fetch starts in a fresh window.
+                time.sleep(random.randint(*MIN_GAP_BETWEEN_FETCHES))
 
             if first_run:
                 log.info(f"Indexed {len(seen_ids)} existing posts across all subreddits. Now watching...")
                 first_run = False
 
-            if len(seen_ids) > 5000:
-                seen_ids = set(list(seen_ids)[-2000:])
+            # Trim memory while correctly keeping the most recent ids
+            if len(seen_order) > 5000:
+                drop = seen_order[:-2000]
+                seen_order = seen_order[-2000:]
+                seen_ids.difference_update(drop)
 
-            jitter = random.randint(0, 30)
-            time.sleep(POLL_INTERVAL + jitter)
+            time.sleep(random.randint(*PAUSE_BETWEEN_SWEEPS))
 
         except Exception as e:
             log.error(f"Unexpected error: {e}. Continuing in 60s...")
