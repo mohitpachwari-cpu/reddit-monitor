@@ -74,7 +74,7 @@ SUBREDDIT_KEYWORDS = {
         "flying returns",
     ],
 
-    {
+
     "delhi_marketplace": [
         "AI Coupon",
         "Economy",
@@ -96,7 +96,7 @@ SUBREDDIT_KEYWORDS = {
         "Yatra",
     ],
 
-        {
+    
     "BangaloreMarketplace": [
         "AI Coupon",
         "Economy",
@@ -118,7 +118,7 @@ SUBREDDIT_KEYWORDS = {
         "Yatra",
     ],
 
-            {
+            
     "delhimarketplace": [
         "AI Coupon",
         "Economy",
@@ -140,7 +140,7 @@ SUBREDDIT_KEYWORDS = {
         "Yatra",
     ],
 
-                {
+                
     "MumbaiMarketplace": [
         "AI Coupon",
         "Economy",
