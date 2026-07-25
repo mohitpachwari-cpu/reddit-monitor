@@ -18,6 +18,8 @@ SUBREDDIT_KEYWORDS = {
         "Economy",
         "Air India",
         "AI Points",
+        "Ai Voucher"
+        "PE Air India Voucher"
         "Maharaja",
         "Taj",
         "bonvoy",
@@ -25,9 +27,12 @@ SUBREDDIT_KEYWORDS = {
         "Marriot",
         "Supercoin",
         "Flight",
+        "EMT",
+        "ITC",
         "marriott bonvoy",
         "Easemytrip",
         "Yatra",
+
     ],
     "amexindia": [
         "AI Coupon",
@@ -67,6 +72,94 @@ SUBREDDIT_KEYWORDS = {
         "bonvoy",
         "redeem",
         "flying returns",
+    ],
+
+    {
+    "delhi_marketplace": [
+        "AI Coupon",
+        "Economy",
+        "Air India",
+        "AI Points",
+        "Ai Voucher"
+        "PE Air India Voucher"
+        "Maharaja",
+        "Taj",
+        "bonvoy",
+        "krisflyer",
+        "Marriot",
+        "Supercoin",
+        "Flight",
+        "ITC"
+        "marriott bonvoy",
+        "Easemytrip",
+        "EMT",
+        "Yatra",
+    ],
+
+        {
+    "BangaloreMarketplace": [
+        "AI Coupon",
+        "Economy",
+        "Air India",
+        "AI Points",
+        "Ai Voucher"
+        "PE Air India Voucher"
+        "Maharaja",
+        "Taj",
+        "bonvoy",
+        "krisflyer",
+        "Marriot",
+        "Supercoin",
+        "Flight",
+        "ITC"
+        "marriott bonvoy",
+        "Easemytrip",
+        "EMT",
+        "Yatra",
+    ],
+
+            {
+    "delhimarketplace": [
+        "AI Coupon",
+        "Economy",
+        "Air India",
+        "AI Points",
+        "Ai Voucher"
+        "PE Air India Voucher"
+        "Maharaja",
+        "Taj",
+        "bonvoy",
+        "krisflyer",
+        "Marriot",
+        "Supercoin",
+        "Flight",
+        "ITC"
+        "marriott bonvoy",
+        "Easemytrip",
+        "EMT",
+        "Yatra",
+    ],
+
+                {
+    "MumbaiMarketplace": [
+        "AI Coupon",
+        "Economy",
+        "Air India",
+        "AI Points",
+        "Ai Voucher"
+        "PE Air India Voucher"
+        "Maharaja",
+        "Taj",
+        "bonvoy",
+        "krisflyer",
+        "Marriot",
+        "Supercoin",
+        "Flight",
+        "ITC"
+        "marriott bonvoy",
+        "Easemytrip",
+        "EMT",
+        "Yatra",
     ],
 }
 
