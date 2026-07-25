@@ -19,7 +19,7 @@ SUBREDDIT_KEYWORDS = {
         "Air India",
         "AI Points",
         "Ai Voucher"
-        "PE Air India Voucher"
+        "PE Air India Voucher",
         "Maharaja",
         "Taj",
         "bonvoy",
@@ -80,8 +80,8 @@ SUBREDDIT_KEYWORDS = {
         "Economy",
         "Air India",
         "AI Points",
-        "Ai Voucher"
-        "PE Air India Voucher"
+        "Ai Voucher",
+        "PE Air India Voucher",
         "Maharaja",
         "Taj",
         "bonvoy",
@@ -89,7 +89,7 @@ SUBREDDIT_KEYWORDS = {
         "Marriot",
         "Supercoin",
         "Flight",
-        "ITC"
+        "ITC",
         "marriott bonvoy",
         "Easemytrip",
         "EMT",
@@ -102,8 +102,8 @@ SUBREDDIT_KEYWORDS = {
         "Economy",
         "Air India",
         "AI Points",
-        "Ai Voucher"
-        "PE Air India Voucher"
+        "Ai Voucher",
+        "PE Air India Voucher",
         "Maharaja",
         "Taj",
         "bonvoy",
@@ -111,7 +111,7 @@ SUBREDDIT_KEYWORDS = {
         "Marriot",
         "Supercoin",
         "Flight",
-        "ITC"
+        "ITC",
         "marriott bonvoy",
         "Easemytrip",
         "EMT",
@@ -124,8 +124,8 @@ SUBREDDIT_KEYWORDS = {
         "Economy",
         "Air India",
         "AI Points",
-        "Ai Voucher"
-        "PE Air India Voucher"
+        "Ai Voucher",
+        "PE Air India Voucher",
         "Maharaja",
         "Taj",
         "bonvoy",
@@ -133,7 +133,7 @@ SUBREDDIT_KEYWORDS = {
         "Marriot",
         "Supercoin",
         "Flight",
-        "ITC"
+        "ITC",
         "marriott bonvoy",
         "Easemytrip",
         "EMT",
@@ -147,7 +147,7 @@ SUBREDDIT_KEYWORDS = {
         "Air India",
         "AI Points",
         "Ai Voucher"
-        "PE Air India Voucher"
+        "PE Air India Voucher",
         "Maharaja",
         "Taj",
         "bonvoy",
