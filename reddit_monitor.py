@@ -46,6 +46,20 @@ SUBREDDIT_KEYWORDS = {
         "Taj",
         "points",
         "Yatra",
+],
+    "IndiaBuySell ": [
+        "AI Coupon",
+        "Air India",
+        "AI Points",
+        "Maharaja",
+        "marriott bonvoy",
+        "bonvoy",
+        "krisflyer",
+        "Blinkit",
+        "Taj",
+        "points",
+        "Yatra",
+        
     ],
     "CreditCardsIndia": [
         "AI Coupon",
