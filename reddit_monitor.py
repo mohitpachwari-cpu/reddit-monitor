@@ -47,6 +47,20 @@ SUBREDDIT_KEYWORDS = {
         "points",
         "Yatra",
 
+ ],
+    "BonvoyPointsExchange": [
+        "AI Coupon",
+        "Air India",
+        "AI Points",
+        "Maharaja",
+        "marriott bonvoy",
+        "bonvoy",
+        "krisflyer",
+        "Blinkit",
+        "Taj",
+        "points",
+        "Yatra",
+        
          ],
     "travel_deals": [
         "AI Coupon",
