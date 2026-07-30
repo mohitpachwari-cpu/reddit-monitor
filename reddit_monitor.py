@@ -94,15 +94,13 @@ SUBREDDIT_KEYWORDS = {
         "Air India",
         "Infinia",
         "marriott bonvoy",
-        "Points",       # <-- these three were missing commas in the
+             # <-- these three were missing commas in the
         "MR points",    #     original, so Python glued them into one
         "AI Points",    #     keyword that never matched. Fixed.
         "Maharaja",
         "krisflyer",
-        "Blinkit",
         "bonvoy",
         "Taj",
-        "points",
         "Yatra",
     ],
     "airindia": [
