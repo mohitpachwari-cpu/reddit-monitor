@@ -24,6 +24,7 @@ SUBREDDIT_KEYWORDS = {
         "Taj",
         "bonvoy",
         "krisflyer",
+        "Amex Points",
         "Marriot",
         "Supercoin",
         "Flight",
