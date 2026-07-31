@@ -77,7 +77,7 @@ SUBREDDIT_KEYWORDS = {
         "points",
         "Yatra",
 ],
-    "IndiaBuySell ": [
+    "IndiaBuySell": [
         "AI Coupon",
         "Air India",
         "AI Points",
