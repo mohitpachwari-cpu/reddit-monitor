@@ -21,6 +21,7 @@ SUBREDDIT_KEYWORDS = {
         "Ai Voucher"
         "PE Air India Voucher",
         "Maharaja",
+        "Mr Points",
         "Taj",
         "bonvoy",
         "krisflyer",
