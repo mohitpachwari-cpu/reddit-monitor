@@ -18,7 +18,7 @@ SUBREDDIT_KEYWORDS = {
         "Economy",
         "Air India",
         "AI Points",
-        "Ai Voucher"
+        "Ai Voucher",
         "PE Air India Voucher",
         "Maharaja",
         "Mr Points",
@@ -48,7 +48,7 @@ SUBREDDIT_KEYWORDS = {
         "points",
         "Yatra",
    ],
-    "r/AirTravelIndia": [
+    "AirTravelIndia": [
         "AI Coupon",
         "Air India",
         "AI Points",
@@ -196,7 +196,7 @@ SUBREDDIT_KEYWORDS = {
         "Economy",
         "Air India",
         "AI Points",
-        "Ai Voucher"
+        "Ai Voucher",
         "PE Air India Voucher",
         "Maharaja",
         "Taj",
