@@ -1,4 +1,5 @@
 import os
+import re
 import requests
 import time
 import logging
@@ -33,7 +34,6 @@ SUBREDDIT_KEYWORDS = {
         "marriott bonvoy",
         "Easemytrip",
         "Yatra",
-
     ],
     "amexindia": [
         "AI Coupon",
@@ -47,7 +47,7 @@ SUBREDDIT_KEYWORDS = {
         "Taj",
         "points",
         "Yatra",
-   ],
+    ],
     "AirTravelIndia": [
         "AI Coupon",
         "Air India",
@@ -59,8 +59,7 @@ SUBREDDIT_KEYWORDS = {
         "Taj",
         "points",
         "Yatra",
-        
- ],
+    ],
     "BonvoyPointsExchange": [
         "AI Coupon",
         "Air India",
@@ -73,8 +72,7 @@ SUBREDDIT_KEYWORDS = {
         "Taj",
         "points",
         "Yatra",
-        
-         ],
+    ],
     "travel_deals": [
         "AI Coupon",
         "Air India",
@@ -87,7 +85,7 @@ SUBREDDIT_KEYWORDS = {
         "Taj",
         "points",
         "Yatra",
-],
+    ],
     "IndiaBuySell": [
         "AI Coupon",
         "Air India",
@@ -100,16 +98,14 @@ SUBREDDIT_KEYWORDS = {
         "Taj",
         "points",
         "Yatra",
-        
     ],
     "CreditCardsIndia": [
         "AI Coupon",
         "Air India",
         "Infinia",
         "marriott bonvoy",
-             # <-- these three were missing commas in the
-        "MR points",    #     original, so Python glued them into one
-        "AI Points",    #     keyword that never matched. Fixed.
+        "MR points",
+        "AI Points",
         "Maharaja",
         "krisflyer",
         "bonvoy",
@@ -126,8 +122,6 @@ SUBREDDIT_KEYWORDS = {
         "redeem",
         "flying returns",
     ],
-
-
     "delhi_marketplace": [
         "AI Coupon",
         "Economy",
@@ -147,8 +141,6 @@ SUBREDDIT_KEYWORDS = {
         "EMT",
         "Yatra",
     ],
-
-    
     "BangaloreMarketplace": [
         "AI Coupon",
         "Economy",
@@ -168,8 +160,6 @@ SUBREDDIT_KEYWORDS = {
         "EMT",
         "Yatra",
     ],
-
-            
     "delhimarketplace": [
         "AI Coupon",
         "Economy",
@@ -189,8 +179,6 @@ SUBREDDIT_KEYWORDS = {
         "EMT",
         "Yatra",
     ],
-
-                
     "MumbaiMarketplace": [
         "AI Coupon",
         "Economy",
@@ -215,16 +203,28 @@ SUBREDDIT_KEYWORDS = {
 # Derived — do not edit
 SUBREDDITS = list(SUBREDDIT_KEYWORDS.keys())
 
+# Case-insensitive lookup, because Reddit permalinks may not preserve the
+# exact capitalization you typed in the dict above.
+KEYWORDS_BY_LOWER = {s.lower(): kws for s, kws in SUBREDDIT_KEYWORDS.items()}
+
+# ─── SPEED: combine subreddits into multireddit feeds ────────────
+# Reddit supports r/sub1+sub2+sub3/new/.rss — one request covers several subs.
+# Fewer requests = faster full cycle, while still respecting ~1 req/min.
+SUBS_PER_GROUP = 6          # 12 subs / 4 = 3 requests per cycle → ~4 min cycle
+FEED_LIMIT     = 100        # max posts per combined feed (Reddit caps at 100)
+
+def build_groups(subs, size):
+    return [subs[i:i + size] for i in range(0, len(subs), size)]
+
+SUB_GROUPS = build_groups(SUBREDDITS, SUBS_PER_GROUP)
+
 # Secrets come from environment variables (set these in Railway → Variables).
-# Nothing sensitive lives in this file anymore.
 TELEGRAM_CONFIG = {
     "bot_token": os.environ.get("TELEGRAM_BOT_TOKEN", ""),
     "chat_id":   os.environ.get("TELEGRAM_CHAT_ID", ""),
 }
 
 # Reddit throttles unauthenticated RSS to roughly 1 request/minute per IP.
-# We fetch one subreddit at a time and wait at least this long between fetches
-# so every request is the first in a fresh window (no more random 429s).
 MIN_GAP_BETWEEN_FETCHES = (65, 80)   # seconds, randomized
 PAUSE_BETWEEN_SWEEPS    = (10, 30)   # small breather after each full sweep
 
@@ -253,13 +253,17 @@ USER_AGENTS = [
 RSS_NS = "{http://www.w3.org/2005/Atom}"
 consecutive_403s = 0
 
+SUB_FROM_URL = re.compile(r"reddit\.com/r/([^/]+)/", re.I)
+
 # ─────────────────────────────────────────────
-#  FETCH POSTS FROM ONE SUBREDDIT
+#  FETCH POSTS FROM ONE GROUP OF SUBREDDITS
 # ─────────────────────────────────────────────
 
-def fetch_posts_from(subreddit):
+def fetch_posts_from_group(group):
+    """Fetch a combined multireddit feed covering several subreddits at once."""
     global consecutive_403s
 
+    label = "+".join(group)
     headers = {
         "User-Agent": random.choice(USER_AGENTS),
         "Accept": "application/rss+xml, application/xml, text/xml, */*",
@@ -267,10 +271,10 @@ def fetch_posts_from(subreddit):
         "Cache-Control": "no-cache",
     }
 
-    url = f"https://www.reddit.com/r/{subreddit}/new/.rss?limit=25"
+    url = f"https://www.reddit.com/r/{'+'.join(group)}/new/.rss?limit={FEED_LIMIT}"
 
     try:
-        response = requests.get(url, headers=headers, timeout=15)
+        response = requests.get(url, headers=headers, timeout=20)
 
         if response.status_code == 200:
             consecutive_403s = 0
@@ -280,14 +284,31 @@ def fetch_posts_from(subreddit):
                 post_id = (entry.findtext(f"{RSS_NS}id") or "").split("_")[-1]
                 title = entry.findtext(f"{RSS_NS}title") or ""
                 content = entry.findtext(f"{RSS_NS}content") or ""
+
                 permalink = ""
                 link_el = entry.find(f"{RSS_NS}link")
                 if link_el is not None:
                     permalink = link_el.get("href", "")
+
+                # Which subreddit did this post come from? The combined feed
+                # mixes several, so read it back out of the permalink.
+                subreddit = ""
+                m = SUB_FROM_URL.search(permalink)
+                if m:
+                    subreddit = m.group(1)
+                if not subreddit:
+                    # Fallback: <category term="subname">
+                    cat = entry.find(f"{RSS_NS}category")
+                    if cat is not None:
+                        subreddit = cat.get("term", "")
+                if not subreddit:
+                    continue  # can't attribute it, skip rather than mis-match
+
                 author = ""
                 author_el = entry.find(f"{RSS_NS}author")
                 if author_el is not None:
                     author = (author_el.findtext(f"{RSS_NS}name") or "").replace("/u/", "")
+
                 created_utc = 0
                 updated = entry.findtext(f"{RSS_NS}updated") or ""
                 if updated:
@@ -296,8 +317,9 @@ def fetch_posts_from(subreddit):
                         created_utc = dt.replace(tzinfo=timezone.utc).timestamp()
                     except Exception:
                         pass
+
                 posts.append({
-                    "id": f"{subreddit}_{post_id}",  # prefix avoids ID collisions across subs
+                    "id": f"{subreddit.lower()}_{post_id}",
                     "title": title,
                     "selftext": content,
                     "permalink": permalink,
@@ -310,14 +332,11 @@ def fetch_posts_from(subreddit):
         elif response.status_code == 403:
             consecutive_403s += 1
             wait = min(300, 60 * consecutive_403s)
-            log.warning(f"r/{subreddit} — 403 blocked (#{consecutive_403s}). Waiting {wait}s...")
+            log.warning(f"[{label}] — 403 blocked (#{consecutive_403s}). Waiting {wait}s...")
             time.sleep(wait)
             return []
 
         elif response.status_code == 429:
-            # Reddit tells us exactly how long to wait — honor the headers
-            # instead of guessing. Prefer Retry-After, fall back to the
-            # rate-limit reset header, then a sane default.
             retry_after = response.headers.get("Retry-After")
             reset = response.headers.get("x-ratelimit-reset")
             if retry_after and retry_after.replace(".", "", 1).isdigit():
@@ -327,16 +346,20 @@ def fetch_posts_from(subreddit):
             else:
                 wait = 60
             wait = min(wait, 300)
-            log.warning(f"r/{subreddit} — rate limited. Waiting {wait}s...")
+            log.warning(f"[{label}] — rate limited. Waiting {wait}s...")
             time.sleep(wait)
             return []
 
+        elif response.status_code == 404:
+            log.warning(f"[{label}] — 404. One of these subreddit names may be wrong.")
+            return []
+
         else:
-            log.warning(f"r/{subreddit} — Reddit returned status {response.status_code}")
+            log.warning(f"[{label}] — Reddit returned status {response.status_code}")
             return []
 
     except Exception as e:
-        log.error(f"r/{subreddit} — Fetch error: {e}")
+        log.error(f"[{label}] — Fetch error: {e}")
         return []
 
 # ─────────────────────────────────────────────
@@ -344,7 +367,7 @@ def fetch_posts_from(subreddit):
 # ─────────────────────────────────────────────
 
 def contains_keyword(post):
-    keywords = SUBREDDIT_KEYWORDS.get(post["subreddit"], [])
+    keywords = KEYWORDS_BY_LOWER.get(post["subreddit"].lower(), [])
     combined = (post["title"] + " " + post["selftext"]).upper()
     for keyword in keywords:
         if keyword.upper() in combined:
@@ -399,19 +422,21 @@ def main():
         log.error("Missing TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID environment variable. Exiting.")
         return
 
-    log.info(f"Monitoring {len(SUBREDDITS)} subreddit(s):")
-    for sub, kws in SUBREDDIT_KEYWORDS.items():
-        log.info(f"  r/{sub} → {', '.join(kws)}")
-    log.info(f"Waiting {MIN_GAP_BETWEEN_FETCHES[0]}-{MIN_GAP_BETWEEN_FETCHES[1]}s between each subreddit fetch")
+    log.info(f"Monitoring {len(SUBREDDITS)} subreddit(s) in {len(SUB_GROUPS)} combined feed(s):")
+    for g in SUB_GROUPS:
+        log.info(f"  [{'+'.join(g)}]")
+    est_lo = len(SUB_GROUPS) * (MIN_GAP_BETWEEN_FETCHES[0] + 1) + PAUSE_BETWEEN_SWEEPS[0]
+    est_hi = len(SUB_GROUPS) * (MIN_GAP_BETWEEN_FETCHES[1] + 1) + PAUSE_BETWEEN_SWEEPS[1]
+    log.info(f"Estimated full cycle: {est_lo/60:.1f}-{est_hi/60:.1f} minutes")
 
     seen_ids = set()
-    seen_order = []   # tracks insertion order so trimming keeps the NEWEST ids
+    seen_order = []
     first_run = True
 
     while True:
         try:
-            for subreddit in SUBREDDITS:
-                posts = fetch_posts_from(subreddit)
+            for group in SUB_GROUPS:
+                posts = fetch_posts_from_group(group)
 
                 for post in posts:
                     post_id = post["id"]
@@ -423,20 +448,17 @@ def main():
                         continue
                     matched = contains_keyword(post)
                     if matched:
-                        log.info(f"'{matched}' found in r/{subreddit}: {post['title'][:60]}")
-                        message = build_message(post, matched)
-                        send_telegram(message)
+                        log.info(f"'{matched}' found in r/{post['subreddit']}: {post['title'][:60]}")
+                        send_telegram(build_message(post, matched))
                         time.sleep(2)
 
-                # Respect Reddit's ~1 request/minute limit: wait before the
-                # next subreddit so every fetch starts in a fresh window.
+                # Respect Reddit's ~1 request/minute limit.
                 time.sleep(random.randint(*MIN_GAP_BETWEEN_FETCHES))
 
             if first_run:
-                log.info(f"Indexed {len(seen_ids)} existing posts across all subreddits. Now watching...")
+                log.info(f"Indexed {len(seen_ids)} existing posts. Now watching...")
                 first_run = False
 
-            # Trim memory while correctly keeping the most recent ids
             if len(seen_order) > 5000:
                 drop = seen_order[:-2000]
                 seen_order = seen_order[-2000:]
