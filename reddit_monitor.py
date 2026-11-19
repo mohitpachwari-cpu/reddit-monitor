@@ -2,7 +2,7 @@ import os
 import requests
 import time
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import random
 
 # ─────────────────────────────────────────────
@@ -222,6 +222,7 @@ TELEGRAM_CONFIG = {
 GAP_BETWEEN_SUBREDDITS = (8, 12)     # seconds
 PAUSE_BETWEEN_SWEEPS   = (120, 150)  # seconds
 POSTS_PER_SUBREDDIT    = 25
+LOOKBACK_DAYS          = 3           # only ask Arctic Shift for posts this recent
 
 # ─────────────────────────────────────────────
 #  LOGGING
@@ -256,8 +257,12 @@ def fetch_posts_from(subreddit):
 
 def _fetch_once(subreddit):
     """One request. Returns (posts or None, retryable)."""
+    # Only search the last few days. Without a date range Arctic Shift scans
+    # the subreddit's whole history, which is what makes it time out (422).
+    since = (datetime.now(timezone.utc) - timedelta(days=LOOKBACK_DAYS)).strftime("%Y-%m-%d")
     params = {
         "subreddit": subreddit,
+        "after": since,
         "sort": "desc",                       # newest first
         "limit": POSTS_PER_SUBREDDIT,
         # No "fields" filter: Arctic Shift rejects the whole request (400)
