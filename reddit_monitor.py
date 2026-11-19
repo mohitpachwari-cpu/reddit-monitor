@@ -1,11 +1,18 @@
 import os
-import re
 import requests
 import time
 import logging
-import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 import random
+
+# ─────────────────────────────────────────────
+#  DATA SOURCE
+# ─────────────────────────────────────────────
+# Reddit shut down RSS feeds on 13 Nov 2026 and closed its API to new
+# developers. This version reads new posts from Arctic Shift, a free,
+# keyless community archive of Reddit (no uptime guarantee).
+ARCTIC_SHIFT_URL = "https://arctic-shift.photon-reddit.com/api/posts/search"
+USER_AGENT = "personal-deal-alert-bot/1.0 (single user, polls every few minutes)"
 
 # ─────────────────────────────────────────────
 #  CONFIGURATION
@@ -203,30 +210,18 @@ SUBREDDIT_KEYWORDS = {
 # Derived — do not edit
 SUBREDDITS = list(SUBREDDIT_KEYWORDS.keys())
 
-# Case-insensitive lookup, because Reddit permalinks may not preserve the
-# exact capitalization you typed in the dict above.
-KEYWORDS_BY_LOWER = {s.lower(): kws for s, kws in SUBREDDIT_KEYWORDS.items()}
-
-# ─── SPEED: combine subreddits into multireddit feeds ────────────
-# Reddit supports r/sub1+sub2+sub3/new/.rss — one request covers several subs.
-# Fewer requests = faster full cycle, while still respecting ~1 req/min.
-SUBS_PER_GROUP = 6          # 12 subs / 4 = 3 requests per cycle → ~4 min cycle
-FEED_LIMIT     = 100        # max posts per combined feed (Reddit caps at 100)
-
-def build_groups(subs, size):
-    return [subs[i:i + size] for i in range(0, len(subs), size)]
-
-SUB_GROUPS = build_groups(SUBREDDITS, SUBS_PER_GROUP)
-
 # Secrets come from environment variables (set these in Railway → Variables).
 TELEGRAM_CONFIG = {
     "bot_token": os.environ.get("TELEGRAM_BOT_TOKEN", ""),
     "chat_id":   os.environ.get("TELEGRAM_CHAT_ID", ""),
 }
 
-# Reddit throttles unauthenticated RSS to roughly 1 request/minute per IP.
-MIN_GAP_BETWEEN_FETCHES = (65, 80)   # seconds, randomized
-PAUSE_BETWEEN_SWEEPS    = (10, 30)   # small breather after each full sweep
+# Timing. Arctic Shift is a free volunteer service, so we stay polite:
+# a short gap between subreddits, then a longer pause before the next sweep.
+# 12 subs × ~10s + ~135s pause ≈ a full scan every ~4-5 minutes.
+GAP_BETWEEN_SUBREDDITS = (8, 12)     # seconds
+PAUSE_BETWEEN_SWEEPS   = (120, 150)  # seconds
+POSTS_PER_SUBREDDIT    = 25
 
 # ─────────────────────────────────────────────
 #  LOGGING
@@ -240,126 +235,66 @@ logging.basicConfig(
 log = logging.getLogger(__name__)
 
 # ─────────────────────────────────────────────
-#  ROTATING USER AGENTS
+#  FETCH NEW POSTS FROM ONE SUBREDDIT
 # ─────────────────────────────────────────────
 
-USER_AGENTS = [
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36",
-    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/118.0.0.0 Safari/537.36",
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 13_1) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.1 Safari/605.1.15",
-]
-
-RSS_NS = "{http://www.w3.org/2005/Atom}"
-consecutive_403s = 0
-
-SUB_FROM_URL = re.compile(r"reddit\.com/r/([^/]+)/", re.I)
-
-# ─────────────────────────────────────────────
-#  FETCH POSTS FROM ONE GROUP OF SUBREDDITS
-# ─────────────────────────────────────────────
-
-def fetch_posts_from_group(group):
-    """Fetch a combined multireddit feed covering several subreddits at once."""
-    global consecutive_403s
-
-    label = "+".join(group)
-    headers = {
-        "User-Agent": random.choice(USER_AGENTS),
-        "Accept": "application/rss+xml, application/xml, text/xml, */*",
-        "Accept-Language": "en-US,en;q=0.9",
-        "Cache-Control": "no-cache",
+def fetch_posts_from(subreddit):
+    params = {
+        "subreddit": subreddit,
+        "sort": "desc",                       # newest first
+        "limit": POSTS_PER_SUBREDDIT,
+        "fields": "id,title,selftext,author,created_utc,permalink,subreddit",
     }
-
-    url = f"https://www.reddit.com/r/{'+'.join(group)}/new/.rss?limit={FEED_LIMIT}"
-
     try:
-        response = requests.get(url, headers=headers, timeout=20)
+        response = requests.get(
+            ARCTIC_SHIFT_URL,
+            params=params,
+            headers={"User-Agent": USER_AGENT},
+            timeout=30,
+        )
 
         if response.status_code == 200:
-            consecutive_403s = 0
-            root = ET.fromstring(response.content)
+            items = (response.json() or {}).get("data") or []
             posts = []
-            for entry in root.findall(f"{RSS_NS}entry"):
-                post_id = (entry.findtext(f"{RSS_NS}id") or "").split("_")[-1]
-                title = entry.findtext(f"{RSS_NS}title") or ""
-                content = entry.findtext(f"{RSS_NS}content") or ""
-
-                permalink = ""
-                link_el = entry.find(f"{RSS_NS}link")
-                if link_el is not None:
-                    permalink = link_el.get("href", "")
-
-                # Which subreddit did this post come from? The combined feed
-                # mixes several, so read it back out of the permalink.
-                subreddit = ""
-                m = SUB_FROM_URL.search(permalink)
-                if m:
-                    subreddit = m.group(1)
-                if not subreddit:
-                    # Fallback: <category term="subname">
-                    cat = entry.find(f"{RSS_NS}category")
-                    if cat is not None:
-                        subreddit = cat.get("term", "")
-                if not subreddit:
-                    continue  # can't attribute it, skip rather than mis-match
-
-                author = ""
-                author_el = entry.find(f"{RSS_NS}author")
-                if author_el is not None:
-                    author = (author_el.findtext(f"{RSS_NS}name") or "").replace("/u/", "")
-
-                created_utc = 0
-                updated = entry.findtext(f"{RSS_NS}updated") or ""
-                if updated:
-                    try:
-                        dt = datetime.strptime(updated, "%Y-%m-%dT%H:%M:%S+00:00")
-                        created_utc = dt.replace(tzinfo=timezone.utc).timestamp()
-                    except Exception:
-                        pass
-
+            for p in items:
+                post_id = p.get("id") or ""
+                if not post_id:
+                    continue
+                sub = p.get("subreddit") or subreddit
+                permalink = p.get("permalink") or f"/r/{sub}/comments/{post_id}/"
+                if permalink.startswith("/"):
+                    permalink = "https://www.reddit.com" + permalink
                 posts.append({
                     "id": f"{subreddit.lower()}_{post_id}",
-                    "title": title,
-                    "selftext": content,
+                    "title": p.get("title") or "",
+                    "selftext": p.get("selftext") or "",
                     "permalink": permalink,
-                    "author": author,
-                    "created_utc": created_utc,
+                    "author": p.get("author") or "unknown",
+                    "created_utc": p.get("created_utc") or 0,
                     "subreddit": subreddit,
                 })
             return posts
 
-        elif response.status_code == 403:
-            consecutive_403s += 1
-            wait = min(300, 60 * consecutive_403s)
-            log.warning(f"[{label}] — 403 blocked (#{consecutive_403s}). Waiting {wait}s...")
-            time.sleep(wait)
-            return []
-
         elif response.status_code == 429:
-            retry_after = response.headers.get("Retry-After")
-            reset = response.headers.get("x-ratelimit-reset")
-            if retry_after and retry_after.replace(".", "", 1).isdigit():
-                wait = int(float(retry_after)) + 2
-            elif reset and reset.replace(".", "", 1).isdigit():
+            reset = response.headers.get("X-RateLimit-Reset") or response.headers.get("Retry-After")
+            try:
                 wait = int(float(reset)) + 2
-            else:
+            except (TypeError, ValueError):
                 wait = 60
-            wait = min(wait, 300)
-            log.warning(f"[{label}] — rate limited. Waiting {wait}s...")
+            wait = max(10, min(wait, 300))
+            log.warning(f"r/{subreddit} — Arctic Shift rate limit. Waiting {wait}s...")
             time.sleep(wait)
-            return []
-
-        elif response.status_code == 404:
-            log.warning(f"[{label}] — 404. One of these subreddit names may be wrong.")
             return []
 
         else:
-            log.warning(f"[{label}] — Reddit returned status {response.status_code}")
+            log.warning(f"r/{subreddit} — Arctic Shift returned status {response.status_code}")
             return []
 
+    except requests.exceptions.Timeout:
+        log.warning(f"r/{subreddit} — Arctic Shift timed out, will retry next sweep")
+        return []
     except Exception as e:
-        log.error(f"[{label}] — Fetch error: {e}")
+        log.error(f"r/{subreddit} — Fetch error: {e}")
         return []
 
 # ─────────────────────────────────────────────
@@ -367,7 +302,7 @@ def fetch_posts_from_group(group):
 # ─────────────────────────────────────────────
 
 def contains_keyword(post):
-    keywords = KEYWORDS_BY_LOWER.get(post["subreddit"].lower(), [])
+    keywords = SUBREDDIT_KEYWORDS.get(post["subreddit"], [])
     combined = (post["title"] + " " + post["selftext"]).upper()
     for keyword in keywords:
         if keyword.upper() in combined:
@@ -399,7 +334,7 @@ def send_telegram(message):
 
 def build_message(post, matched_keyword):
     if post["created_utc"]:
-        ts = datetime.fromtimestamp(post["created_utc"], tz=timezone.utc).strftime("%d %b %Y, %H:%M UTC")
+        ts = datetime.fromtimestamp(float(post["created_utc"]), tz=timezone.utc).strftime("%d %b %Y, %H:%M UTC")
     else:
         ts = "Unknown"
     return (
@@ -422,11 +357,9 @@ def main():
         log.error("Missing TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID environment variable. Exiting.")
         return
 
-    log.info(f"Monitoring {len(SUBREDDITS)} subreddit(s) in {len(SUB_GROUPS)} combined feed(s):")
-    for g in SUB_GROUPS:
-        log.info(f"  [{'+'.join(g)}]")
-    est_lo = len(SUB_GROUPS) * (MIN_GAP_BETWEEN_FETCHES[0] + 1) + PAUSE_BETWEEN_SWEEPS[0]
-    est_hi = len(SUB_GROUPS) * (MIN_GAP_BETWEEN_FETCHES[1] + 1) + PAUSE_BETWEEN_SWEEPS[1]
+    log.info(f"Source: Arctic Shift. Monitoring {len(SUBREDDITS)} subreddit(s).")
+    est_lo = len(SUBREDDITS) * GAP_BETWEEN_SUBREDDITS[0] + PAUSE_BETWEEN_SWEEPS[0]
+    est_hi = len(SUBREDDITS) * GAP_BETWEEN_SUBREDDITS[1] + PAUSE_BETWEEN_SWEEPS[1]
     log.info(f"Estimated full cycle: {est_lo/60:.1f}-{est_hi/60:.1f} minutes")
 
     seen_ids = set()
@@ -435,8 +368,11 @@ def main():
 
     while True:
         try:
-            for group in SUB_GROUPS:
-                posts = fetch_posts_from_group(group)
+            for subreddit in SUBREDDITS:
+                posts = fetch_posts_from(subreddit)
+
+                if first_run:
+                    log.info(f"  r/{subreddit}: {len(posts)} recent posts found")
 
                 for post in posts:
                     post_id = post["id"]
@@ -448,12 +384,11 @@ def main():
                         continue
                     matched = contains_keyword(post)
                     if matched:
-                        log.info(f"'{matched}' found in r/{post['subreddit']}: {post['title'][:60]}")
+                        log.info(f"'{matched}' found in r/{subreddit}: {post['title'][:60]}")
                         send_telegram(build_message(post, matched))
                         time.sleep(2)
 
-                # Respect Reddit's ~1 request/minute limit.
-                time.sleep(random.randint(*MIN_GAP_BETWEEN_FETCHES))
+                time.sleep(random.randint(*GAP_BETWEEN_SUBREDDITS))
 
             if first_run:
                 log.info(f"Indexed {len(seen_ids)} existing posts. Now watching...")
