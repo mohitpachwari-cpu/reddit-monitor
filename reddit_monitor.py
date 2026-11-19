@@ -243,7 +243,8 @@ def fetch_posts_from(subreddit):
         "subreddit": subreddit,
         "sort": "desc",                       # newest first
         "limit": POSTS_PER_SUBREDDIT,
-        "fields": "id,title,selftext,author,created_utc,permalink,subreddit",
+        # No "fields" filter: Arctic Shift rejects the whole request (400)
+        # if any listed field name is unknown, so take the full post object.
     }
     try:
         response = requests.get(
@@ -287,7 +288,8 @@ def fetch_posts_from(subreddit):
             return []
 
         else:
-            log.warning(f"r/{subreddit} — Arctic Shift returned status {response.status_code}")
+            detail = (response.text or "").strip().replace("\n", " ")[:300]
+            log.warning(f"r/{subreddit} — Arctic Shift returned status {response.status_code}: {detail}")
             return []
 
     except requests.exceptions.Timeout:
