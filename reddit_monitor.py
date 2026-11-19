@@ -238,7 +238,24 @@ log = logging.getLogger(__name__)
 #  FETCH NEW POSTS FROM ONE SUBREDDIT
 # ─────────────────────────────────────────────
 
+TIMEOUT_RETRY_WAITS = (15, 30)   # seconds to wait before each retry of a timed-out query
+
+
 def fetch_posts_from(subreddit):
+    """Return a list of posts on success (possibly empty), or None if the
+    fetch failed. Arctic Shift sometimes times out on its side (status 422,
+    "Timeout. Maybe slow down a bit"); those are retried with a pause."""
+    for attempt in range(len(TIMEOUT_RETRY_WAITS) + 1):
+        posts, retryable = _fetch_once(subreddit)
+        if posts is not None or not retryable or attempt == len(TIMEOUT_RETRY_WAITS):
+            return posts
+        wait = TIMEOUT_RETRY_WAITS[attempt]
+        log.info(f"r/{subreddit} — retrying in {wait}s (attempt {attempt + 2})")
+        time.sleep(wait)
+
+
+def _fetch_once(subreddit):
+    """One request. Returns (posts or None, retryable)."""
     params = {
         "subreddit": subreddit,
         "sort": "desc",                       # newest first
@@ -274,7 +291,7 @@ def fetch_posts_from(subreddit):
                     "created_utc": p.get("created_utc") or 0,
                     "subreddit": subreddit,
                 })
-            return posts
+            return posts, False
 
         elif response.status_code == 429:
             reset = response.headers.get("X-RateLimit-Reset") or response.headers.get("Retry-After")
@@ -285,19 +302,20 @@ def fetch_posts_from(subreddit):
             wait = max(10, min(wait, 300))
             log.warning(f"r/{subreddit} — Arctic Shift rate limit. Waiting {wait}s...")
             time.sleep(wait)
-            return []
+            return None, False
 
         else:
             detail = (response.text or "").strip().replace("\n", " ")[:300]
             log.warning(f"r/{subreddit} — Arctic Shift returned status {response.status_code}: {detail}")
-            return []
+            retryable = response.status_code == 422 or response.status_code >= 500
+            return None, retryable
 
     except requests.exceptions.Timeout:
-        log.warning(f"r/{subreddit} — Arctic Shift timed out, will retry next sweep")
-        return []
+        log.warning(f"r/{subreddit} — Arctic Shift request timed out")
+        return None, True
     except Exception as e:
         log.error(f"r/{subreddit} — Fetch error: {e}")
-        return []
+        return None, False
 
 # ─────────────────────────────────────────────
 #  KEYWORD CHECKER
@@ -366,14 +384,25 @@ def main():
 
     seen_ids = set()
     seen_order = []
-    first_run = True
+    # A subreddit only starts alerting after one SUCCESSFUL fetch has silently
+    # recorded its existing posts. If its first fetch fails, it is indexed on
+    # the next successful one instead, so old posts never trigger alerts.
+    indexed_subs = set()
+    first_sweep = True
 
     while True:
         try:
             for subreddit in SUBREDDITS:
                 posts = fetch_posts_from(subreddit)
 
-                if first_run:
+                if posts is None:
+                    if subreddit not in indexed_subs:
+                        log.info(f"  r/{subreddit}: not indexed yet, will try again next sweep")
+                    time.sleep(random.randint(*GAP_BETWEEN_SUBREDDITS))
+                    continue
+
+                indexing = subreddit not in indexed_subs
+                if indexing:
                     log.info(f"  r/{subreddit}: {len(posts)} recent posts found")
 
                 for post in posts:
@@ -382,19 +411,25 @@ def main():
                         continue
                     seen_ids.add(post_id)
                     seen_order.append(post_id)
-                    if first_run:
-                        continue
+                    if indexing:
+                        continue          # existing post: record it, don't alert
                     matched = contains_keyword(post)
                     if matched:
                         log.info(f"'{matched}' found in r/{subreddit}: {post['title'][:60]}")
                         send_telegram(build_message(post, matched))
                         time.sleep(2)
 
+                if indexing:
+                    indexed_subs.add(subreddit)
+                    if not first_sweep:
+                        log.info(f"  r/{subreddit}: indexed late, now watching it too")
+
                 time.sleep(random.randint(*GAP_BETWEEN_SUBREDDITS))
 
-            if first_run:
-                log.info(f"Indexed {len(seen_ids)} existing posts. Now watching...")
-                first_run = False
+            if first_sweep:
+                log.info(f"Indexed {len(seen_ids)} existing posts across "
+                         f"{len(indexed_subs)}/{len(SUBREDDITS)} subreddits. Now watching...")
+                first_sweep = False
 
             if len(seen_order) > 5000:
                 drop = seen_order[:-2000]
